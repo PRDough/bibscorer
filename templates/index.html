@@ -22,6 +22,9 @@
     {% endif %}
     <div class="mb-3">
       <input type="file" class="form-control" name="bibfile" accept=".bib">
+      {% if token %}
+      <div class="form-text">Leave empty to re-rank the current file with new weights.</div>
+      {% endif %}
     </div>
 
     <!-- 🎯 Keyword Weighting Section -->
@@ -29,11 +32,71 @@
       <h3 class="mb-0">🎯 Define Your Keywords and Weights</h3>
       <button type="submit" class="btn btn-primary">🔍 Analyze and Rank</button>
     </div>
-    <p class="text-muted">Enter keyword-weight pairs (e.g., <code>just transition:3</code>). Each occurrence in the title, abstract, or keywords adds its weight to the score.</p>
+    <p class="text-muted">
+      Enter one keyword-weight pair per line (e.g., <code>just transition:3</code>).
+      Keywords match whole words only; add <code>*</code> to match a prefix (<code>steel*</code> also matches "steelmaking").
+    </p>
     <div class="mb-3">
-      <textarea name="weights" class="form-control" rows="5" placeholder="just transition:3&#10;steel:2"
+      <textarea name="weights" class="form-control" rows="5" placeholder="just transition:3&#10;steel*:2"
         required>{{ weights_text or '' }}</textarea>
     </div>
+
+    <!-- ⚖️ Field Weights -->
+    <h5 class="mt-3">⚖️ Field Multipliers</h5>
+    <p class="text-muted">Each match is worth <em>keyword weight × field multiplier</em>. Set a field to 0 to ignore it.</p>
+    <div class="row g-3 mb-3">
+      {% for field, value in field_weights.items() %}
+      <div class="col-sm-4">
+        <div class="input-group">
+          <label class="input-group-text text-capitalize" for="fw_{{ field }}">{{ field }} ×</label>
+          <input type="number" class="form-control" id="fw_{{ field }}" name="fw_{{ field }}"
+            value="{{ '%g' % value }}" min="0" step="0.5">
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if rows %}
+    <!-- 📊 Ranking Preview -->
+    <h3 class="mt-4">📊 Ranking</h3>
+    <p class="text-muted">
+      {{ matched }} of {{ total }} entries matched at least one keyword.
+      {% if total > rows|length %}Showing the top {{ rows|length }}; the CSV export includes all entries.{% endif %}
+      Click a title to see its abstract.
+    </p>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm table-hover align-top">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Score</th>
+            <th>Title</th>
+            <th>Matched</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td class="text-muted">{{ r.rank }}</td>
+            <td><strong>{{ r.score }}</strong></td>
+            <td>
+              {% if r.abstract %}
+              <details>
+                <summary>{{ r.title or '(untitled)' }}</summary>
+                <p class="small mt-2 mb-0">{{ r.abstract }}</p>
+              </details>
+              {% else %}
+              {{ r.title or '(untitled)' }}
+              {% endif %}
+              <div class="small text-muted">{{ r.authors }}{% if r.authors and r.year %}, {% endif %}{{ r.year }}</div>
+            </td>
+            <td class="small">{{ r.matches or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
 
     {% if headers and token %}
     <!-- 📌 Field Selection Section -->
@@ -42,8 +105,8 @@
     <div class="mb-3 text-start">
       {% for h in headers %}
       <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="fields" value="{{ h }}">
-        <label class="form-check-label">{{ h }}</label>
+        <input class="form-check-input" type="checkbox" name="fields" value="{{ h }}" id="field_{{ loop.index }}">
+        <label class="form-check-label" for="field_{{ loop.index }}">{{ h }}</label>
       </div>
       {% endfor %}
     </div>

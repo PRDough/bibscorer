@@ -21,9 +21,13 @@ BibScorer is a small Flask web app that ranks the references in a BibTeX file by
    steel:2
    CO2: capture:1
    ```
-   The text after the last colon is the weight, so keywords may contain colons.
-3. **Scoring.** For each entry, BibScorer counts how often each keyword appears in the `title`, `abstract` and `keywords` fields combined (case-insensitive), multiplies the count by the weight, and adds everything up. Entries are sorted by score, highest first.
-4. **Export.** Tick the fields you want (e.g. `title`, `author`, `year`, `score`) and download them as `filtered_output.csv`.
+   The text after the last colon is the weight, so keywords may contain colons. Negative weights push matching entries down.
+   - Keywords match **whole words**, case-insensitive: `art` does not match "partial".
+   - Add `*` to match a **prefix**: `steel*` matches "steel", "steels" and "steelmaking".
+3. **Set field multipliers** (default: title ×3, keywords ×2, abstract ×1). A match in the title then counts three times as much as one in the abstract. Set a field to 0 to ignore it.
+4. **Scoring.** Each match adds *keyword weight × field multiplier*. Entries are sorted by total score, highest first.
+5. **Review the ranking** on the page. The top 100 entries are shown with their score, matched keywords and highlighted titles. Click a title to see its abstract. To try different weights, edit them and click **Analyze and Rank** again; there's no need to re-upload.
+6. **Export.** Tick the fields you want (e.g. `title`, `author`, `year`, `score`, `matched_keywords`) and download them as `filtered_output.csv`.
 
 Before scoring, BibScorer strips common BibTeX/LaTeX markup from those three fields, such as braces, `$...$` math and escaped characters. For example, `CO$_2$` becomes `CO2`.
 
@@ -86,9 +90,13 @@ BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键
    steel:2
    CO2: capture:1
    ```
-   以最后一个冒号后面的内容作为权重，所以关键词里可以带冒号。
-3. **打分规则**：对每条文献，统计每个关键词在 `title`、`abstract`、`keywords` 三个字段中一共出现几次（不区分大小写），乘以权重后相加，得到总分。结果按分数从高到低排列。
-4. **导出**：勾选需要的字段（如 `title`、`author`、`year`、`score`），下载为 `filtered_output.csv`。
+   以最后一个冒号后面的内容作为权重，所以关键词里可以带冒号。权重可以是负数，用来把命中的文献往后排。
+   - 关键词按**整词**匹配，不区分大小写：`art` 不会匹配到 "partial"。
+   - 结尾加 `*` 表示**前缀匹配**：`steel*` 能匹配 "steel"、"steels" 和 "steelmaking"。
+3. **设置字段系数**（默认：标题 ×3、keywords ×2、摘要 ×1）。这样同一个关键词出现在标题里，得分是出现在摘要里的 3 倍。某个字段设为 0 就不参与打分。
+4. **打分规则**：每命中一次，加 *关键词权重 × 字段系数*。结果按总分从高到低排列。
+5. **在网页上查看排名**：显示前 100 篇的分数、命中的关键词，标题里命中的词会高亮。点击标题可以展开摘要。想换权重试试，改完直接再点 **Analyze and Rank**，不用重新上传。
+6. **导出**：勾选需要的字段（如 `title`、`author`、`year`、`score`、`matched_keywords`），下载为 `filtered_output.csv`。
 
 打分前，程序会先清理这三个字段里常见的 BibTeX/LaTeX 符号，比如花括号、`$...$` 公式和转义字符。例如 `CO$_2$` 会变成 `CO2`。
 
