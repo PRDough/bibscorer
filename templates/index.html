@@ -8,11 +8,18 @@
 <!-- 📂 Upload Section -->
 <div class="container mt-4">
   <h2>📂 Upload Your BibTeX File (.bib)</h2>
+  {% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+  {% endif %}
   {% if uploaded_filename %}
   <p class="text-success">✅ Uploaded: {{ uploaded_filename }}</p>
   {% endif %}
 
   <form action="/" method="post" enctype="multipart/form-data">
+    {% if token %}
+    <input type="hidden" name="token" value="{{ token }}">
+    <input type="hidden" name="uploaded_filename" value="{{ uploaded_filename or '' }}">
+    {% endif %}
     <div class="mb-3">
       <input type="file" class="form-control" name="bibfile" accept=".bib">
     </div>
@@ -22,13 +29,13 @@
       <h3 class="mb-0">🎯 Define Your Keywords and Weights</h3>
       <button type="submit" class="btn btn-primary">🔍 Analyze and Rank</button>
     </div>
-    <p class="text-muted">Enter keyword-weight pairs (e.g., <code>just transition:3</code>)</p>
+    <p class="text-muted">Enter keyword-weight pairs (e.g., <code>just transition:3</code>). Each occurrence in the title, abstract, or keywords adds its weight to the score.</p>
     <div class="mb-3">
       <textarea name="weights" class="form-control" rows="5" placeholder="just transition:3&#10;steel:2"
         required>{{ weights_text or '' }}</textarea>
     </div>
 
-    {% if headers %}
+    {% if headers and token %}
     <!-- 📌 Field Selection Section -->
     <h3 class="mt-4">📌 Select Fields to Include in CSV Output</h3>
     <p class="text-muted">Check the fields you want to include in the final export</p>

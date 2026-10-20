@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# App runtime data
+output/
+uploads/
+last_upload.csv
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

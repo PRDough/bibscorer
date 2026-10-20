@@ -1,14 +1,20 @@
-from flask import Flask, render_template, request, send_from_directory
+from flask import Flask, render_template, request, send_file
 import os
+import io
+import re
+import time
+import uuid
 import pandas as pd
 import bibtexparser
-import re
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-UPLOAD_FOLDER = 'uploads'
+# 上传上限 10 MB
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
 OUTPUT_FOLDER = 'output'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# 打分结果保留时间（秒），过期自动删除
+RESULT_TTL = 60 * 60
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # 清洗函数
@@ -22,7 +28,7 @@ def clean_text(text):
 
     # 删除所有残留的 $...$ latex 公式
     text = re.sub(r"\$[^$]*\$", "", text)
-   
+
     # --- 其他通用符号清洗 ---
     text = re.sub(r"\$_ ?(?:extrm|textrm)?(\d)\$", r"\1", text)
     text = re.sub(r"[{}]", "", text)
@@ -47,66 +53,134 @@ def score_entry(keywords, weights):
         score += keywords.count(keyword.lower()) * weight
     return score
 
+
+# 解析 "关键词:权重"，按最后一个冒号切分，关键词本身可以带冒号
+def parse_weights(raw_input):
+    weights = {}
+    for line in raw_input.splitlines():
+        if ':' not in line:
+            continue
+        k, v = line.rsplit(':', 1)
+        try:
+            weights[k.strip()] = int(v.strip())
+        except ValueError:
+            continue
+    weights.pop("", None)
+    return weights
+
+
+# 每次上传生成独立的结果文件，避免不同用户互相覆盖
+def result_path(token):
+    try:
+        token = uuid.UUID(token).hex
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return os.path.join(OUTPUT_FOLDER, f"{token}.csv")
+
+
+def remove_expired_results():
+    now = time.time()
+    for name in os.listdir(OUTPUT_FOLDER):
+        path = os.path.join(OUTPUT_FOLDER, name)
+        if name.endswith(".csv") and now - os.path.getmtime(path) > RESULT_TTL:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def render_index(**kwargs):
+    context = dict(headers=None, weights_text="", uploaded_filename=None, token=None, error=None)
+    context.update(kwargs)
+    return render_template("index.html", **context)
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
-    if request.method == "POST":
-        bib_file = request.files.get("bibfile")
-        raw_input = request.form.get("weights", "")
-        weights = {}
+    if request.method == "GET":
+        return render_index()
 
-        for line in raw_input.splitlines():
-            if ':' in line:
-                try:
-                    k, v = line.split(':')
-                    weights[k.strip()] = int(v.strip())
-                except:
-                    continue
+    bib_file = request.files.get("bibfile")
+    raw_input = request.form.get("weights", "")
+    weights = parse_weights(raw_input)
 
-        filename = None
-        headers = None
+    if not bib_file or not bib_file.filename:
+        return render_index(weights_text=raw_input, error="Please choose a .bib file to upload.")
+    if not weights:
+        return render_index(weights_text=raw_input, error="No valid keyword:weight pairs found (weights must be integers).")
 
-        if bib_file:
-            filename = secure_filename(bib_file.filename)
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            bib_file.save(filepath)
+    filename = secure_filename(bib_file.filename)
 
-            with open(filepath, encoding="utf-8") as bibtex_file:
-                bib_database = bibtexparser.load(bibtex_file)
-            entries = bib_database.entries
-            df = pd.DataFrame(entries)
+    # 直接在内存中解析，不把上传文件留在服务器上
+    try:
+        bib_database = bibtexparser.loads(bib_file.read().decode("utf-8-sig"))
+    except UnicodeDecodeError:
+        return render_index(weights_text=raw_input, error="The file is not valid UTF-8 text.")
+    except Exception:
+        return render_index(weights_text=raw_input, error="Could not parse the file as BibTeX.")
 
-            # 清洗字段
-            for col in ['title', 'abstract', 'keywords']:
-                if col in df.columns:
-                    df[col] = df[col].apply(clean_text)
-                else:
-                    df[col] = ""
+    entries = bib_database.entries
+    if not entries:
+        return render_index(weights_text=raw_input, error="No BibTeX entries were found in the file.")
+    df = pd.DataFrame(entries)
 
-            # 打分
-            df['score'] = df['keywords'].apply(lambda x: score_entry(x, weights))
+    # 清洗字段
+    for col in ['title', 'abstract', 'keywords']:
+        if col in df.columns:
+            df[col] = df[col].apply(clean_text)
+        else:
+            df[col] = ""
 
-            # 排序保存
-            df_sorted = df.sort_values('score', ascending=False)
-            df_sorted.to_csv("last_upload.csv", index=False)
-            headers = list(df_sorted.columns)
+    # 打分：title、abstract、keywords 三个字段合并计数
+    scored_text = df['title'] + " " + df['abstract'] + " " + df['keywords']
+    df['score'] = scored_text.apply(lambda x: score_entry(x, weights))
 
-            return render_template(
-                "index.html",
-                headers=headers,
-                weights_text=raw_input,
-                uploaded_filename=filename
-            )
+    # 排序保存
+    df_sorted = df.sort_values('score', ascending=False)
+    remove_expired_results()
+    token = uuid.uuid4().hex
+    df_sorted.to_csv(result_path(token), index=False)
 
-    return render_template("index.html", headers=None, weights_text="", uploaded_filename=None)
+    return render_index(
+        headers=list(df_sorted.columns),
+        weights_text=raw_input,
+        uploaded_filename=filename,
+        token=token,
+    )
+
 
 @app.route("/download", methods=["POST"])
 def download():
-    selected_fields = request.form.getlist("fields")
-    df = pd.read_csv("last_upload.csv")
-    df_filtered = df[selected_fields]
-    output_path = os.path.join(OUTPUT_FOLDER, "filtered_output.csv")
-    df_filtered.to_csv(output_path, index=False)
-    return send_from_directory(OUTPUT_FOLDER, "filtered_output.csv", as_attachment=True)
+    path = result_path(request.form.get("token"))
+    if not path or not os.path.exists(path):
+        return render_index(
+            weights_text=request.form.get("weights", ""),
+            error="Your results have expired. Please upload the file again.",
+        )
+
+    df = pd.read_csv(path)
+    headers = list(df.columns)
+    selected_fields = [f for f in request.form.getlist("fields") if f in headers]
+    if not selected_fields:
+        return render_index(
+            headers=headers,
+            weights_text=request.form.get("weights", ""),
+            uploaded_filename=request.form.get("uploaded_filename"),
+            token=request.form.get("token"),
+            error="Please select at least one field to export.",
+        )
+
+    buffer = io.BytesIO()
+    df[selected_fields].to_csv(buffer, index=False)
+    buffer.seek(0)
+    return send_file(buffer, mimetype="text/csv", as_attachment=True, download_name="filtered_output.csv")
+
+
+@app.errorhandler(413)
+def file_too_large(e):
+    return render_index(error="The file is too large (limit: 10 MB)."), 413
+
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # 调试模式用环境变量开启：FLASK_DEBUG=1 python app.py
+    app.run()
