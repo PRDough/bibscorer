@@ -2,9 +2,13 @@ services:
   - type: web
     name: bibscore
     env: python
-    buildCommand: ""
-    startCommand: gunicorn app:app
+    # 构建时预先下载向量模型，避免第一次语义打分时再下载
+    buildCommand: pip install -r requirements.txt && python semantic.py
+    # 语义打分在免费版的低配 CPU 上比较慢，放宽超时
+    startCommand: gunicorn app:app --timeout 600
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
+      - key: SEMANTIC_MAX_ENTRIES
+        value: "300"
     plan: free

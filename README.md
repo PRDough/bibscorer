@@ -31,10 +31,19 @@ BibScorer is a small Flask web app that ranks the references in a BibTeX file by
 
 Before scoring, BibScorer strips common BibTeX/LaTeX markup from those three fields, such as braces, `$...$` math and escaped characters. For example, `CO$_2$` becomes `CO2`.
 
+### Semantic ranking (optional)
+
+Keywords miss papers that describe the same idea in different words. You can also write a **research question** in one sentence, e.g. *"How do steel-producing regions protect workers during decarbonization?"*. BibScorer then embeds each entry's title and abstract with a small local model ([`BAAI/bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5) via [fastembed](https://github.com/qdrant/fastembed)) and adds a `similarity` column, the cosine similarity from 0 to 1. Choose **Rank by → Similarity to research question** to sort by it. Keyword weights become optional when you use a question.
+
+- The model runs on the server itself. No API key is needed and your references aren't sent to any third party.
+- It works best in English.
+- The first semantic run on a file takes the longest, because every abstract has to be embedded. Later re-ranks of the same file reuse those vectors.
+- The public site allows up to 300 entries per file for semantic ranking. Run it locally to handle larger files (default limit: 1000).
+
 ### Privacy
 
 - Uploaded `.bib` files are parsed in memory and never written to disk.
-- Each upload's scored result is saved under a random ID in `output/`, so users can't see each other's data. Results are deleted after one hour.
+- Each upload's data and results are saved under a random ID in `output/`, so users can't see each other's data. They are deleted after one hour of inactivity.
 
 ### Run locally
 
@@ -49,21 +58,47 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Then open <http://127.0.0.1:5000>. To turn on debug mode, run `FLASK_DEBUG=1 python app.py`.
+Then open <http://127.0.0.1:5000>. To turn on debug mode, run `FLASK_DEBUG=1 python app.py`. The embedding model (about 70 MB) is downloaded into `.models/` the first time you use semantic ranking.
+
+### Configuration
+
+All settings are optional environment variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEMANTIC_ENABLED` | `1` | Set to `0` to turn off semantic ranking and hide the research-question box |
+| `SEMANTIC_MAX_ENTRIES` | `1000` | Maximum entries per file for semantic ranking |
+| `EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | Any text model [supported by fastembed](https://qdrant.github.io/fastembed/examples/Supported_Models/) |
+| `EMBED_CACHE_DIR` | `.models/` | Where the model is stored |
+| `EMBED_BATCH_SIZE` / `EMBED_THREADS` | `8` / `1` | Larger values are faster but use more memory |
+
+### Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The tests use a fake embedding model, so they run in seconds without downloading anything. To also test the real model, run `RUN_SLOW=1 pytest`. GitHub Actions runs the tests on every push and pull request.
 
 ### Deploy to Render
 
-The repository includes a `render.yaml` blueprint. In Render, choose **New → Blueprint** and connect this repository. It runs the app with `gunicorn app:app` on Python 3.12.
+The repository includes a `render.yaml` blueprint. In Render, choose **New → Blueprint** and connect this repository. The build installs the dependencies and pre-downloads the embedding model. The app then runs with `gunicorn` on Python 3.12.
 
-On Render's free plan the disk is wiped on restart, so any stored results are lost and users have to upload again.
+- With small batches, the app peaks at about 300 MB of memory, which fits the free plan's 512 MB.
+- The free plan's CPU is slow, so semantic ranking a few hundred entries can take a minute or more. That's why the request timeout is raised to 10 minutes and the entry limit is 300.
+- The disk is wiped on restart, so any stored results are lost and users have to upload again.
 
 ### Project structure
 
 ```
-app.py                 Flask app: cleaning, scoring, upload and download routes
+app.py                 Flask app: upload, ranking page and CSV download
+scoring.py             Keyword scoring: text cleaning, weight parsing, whole-word matching
+semantic.py            Semantic ranking with a local embedding model
 templates/layout.html  Base layout (Bootstrap 5)
-templates/index.html   Upload, weights and field-selection page
-requirements.txt       Python dependencies
+templates/index.html   Upload, weights, ranking and field-selection page
+tests/                 pytest suite
+requirements.txt       Python dependencies (requirements-dev.txt adds pytest)
 render.yaml            Render deployment config
 ```
 
@@ -100,10 +135,19 @@ BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键
 
 打分前，程序会先清理这三个字段里常见的 BibTeX/LaTeX 符号，比如花括号、`$...$` 公式和转义字符。例如 `CO$_2$` 会变成 `CO2`。
 
+### 语义打分（可选）
+
+关键词会漏掉那些换了一种说法、但内容相关的文献。你还可以用一句话写下**研究问题**，比如 *"How do steel-producing regions protect workers during decarbonization?"*。程序会用一个本地小模型（通过 [fastembed](https://github.com/qdrant/fastembed) 运行 [`BAAI/bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5)）把每篇文献的标题和摘要转成向量，然后加一列 `similarity`，即余弦相似度，范围 0 到 1。在 **Rank by** 里选 **Similarity to research question** 就按它排序。填了研究问题后，关键词权重可以不填。
+
+- 模型就在服务器上运行，不需要 API key，文献也不会发给任何第三方。
+- 英文效果最好。
+- 一个文件第一次做语义打分最慢，因为每篇摘要都要转成向量。之后对同一个文件重新排序，会直接用算好的向量。
+- 在线网站上，每个文件最多对 300 篇做语义打分。文件更大的话请在本地运行（默认上限 1000 篇）。
+
 ### 隐私
 
 - 上传的 `.bib` 文件只在内存中解析，不会存到磁盘。
-- 每次上传的打分结果以随机编号单独存放在 `output/` 下，用户之间互相看不到。结果一小时后自动删除。
+- 每次上传的数据和结果以随机编号单独存放在 `output/` 下，用户之间互相看不到。一小时没有使用就会自动删除。
 
 ### 本地运行
 
@@ -118,21 +162,47 @@ pip install -r requirements.txt
 python app.py
 ```
 
-然后打开 <http://127.0.0.1:5000>。需要调试模式时运行 `FLASK_DEBUG=1 python app.py`。
+然后打开 <http://127.0.0.1:5000>。需要调试模式时运行 `FLASK_DEBUG=1 python app.py`。第一次使用语义打分时，会把向量模型（约 70 MB）下载到 `.models/`。
+
+### 配置
+
+以下都是可选的环境变量：
+
+| 变量 | 默认值 | 含义 |
+|---|---|---|
+| `SEMANTIC_ENABLED` | `1` | 设为 `0` 关闭语义打分，页面上也不显示研究问题输入框 |
+| `SEMANTIC_MAX_ENTRIES` | `1000` | 每个文件最多对多少篇做语义打分 |
+| `EMBED_MODEL` | `BAAI/bge-small-en-v1.5` | 可以换成任何 [fastembed 支持的](https://qdrant.github.io/fastembed/examples/Supported_Models/)文本模型 |
+| `EMBED_CACHE_DIR` | `.models/` | 模型存放位置 |
+| `EMBED_BATCH_SIZE` / `EMBED_THREADS` | `8` / `1` | 调大会更快，但更占内存 |
+
+### 测试
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+测试用的是假的向量模型，不下载任何东西，几秒钟就能跑完。要连真实模型一起测，运行 `RUN_SLOW=1 pytest`。每次 push 和提 pull request 时，GitHub Actions 都会自动跑测试。
 
 ### 部署到 Render
 
-仓库里已经有 `render.yaml`。在 Render 中选择 **New → Blueprint**，连接本仓库即可。它会用 Python 3.12 运行 `gunicorn app:app`。
+仓库里已经有 `render.yaml`。在 Render 中选择 **New → Blueprint**，连接本仓库即可。构建时会安装依赖并预先下载向量模型，然后用 Python 3.12 通过 `gunicorn` 运行。
 
-Render 免费版重启后磁盘会清空，已保存的结果会丢失，用户需要重新上传。
+- 分小批计算时，内存峰值约 300 MB，免费版的 512 MB 够用。
+- 免费版的 CPU 很慢，几百篇做语义打分可能要一分钟以上。所以请求超时放宽到了 10 分钟，每个文件的上限设成 300 篇。
+- 重启后磁盘会清空，已保存的结果会丢失，用户需要重新上传。
 
 ### 目录结构
 
 ```
-app.py                 Flask 主程序：文本清理、打分、上传与下载
+app.py                 Flask 主程序：上传、排名页面和 CSV 下载
+scoring.py             关键词打分：文本清理、权重解析、整词匹配
+semantic.py            用本地向量模型做语义打分
 templates/layout.html  基础布局（Bootstrap 5）
-templates/index.html   上传、权重设置和字段选择页面
-requirements.txt       Python 依赖
+templates/index.html   上传、权重、排名和字段选择页面
+tests/                 pytest 测试
+requirements.txt       Python 依赖（requirements-dev.txt 额外包含 pytest）
 render.yaml            Render 部署配置
 ```
 

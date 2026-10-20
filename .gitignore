@@ -9,8 +9,10 @@ venv/
 output/
 uploads/
 last_upload.csv
+.models/
 
 # OS / editor
 .DS_Store
 .vscode/
 .idea/
+.pytest_cache/

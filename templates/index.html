@@ -30,7 +30,7 @@
     <!-- 🎯 Keyword Weighting Section -->
     <div class="d-flex justify-content-between align-items-center mt-4">
       <h3 class="mb-0">🎯 Define Your Keywords and Weights</h3>
-      <button type="submit" class="btn btn-primary">🔍 Analyze and Rank</button>
+      <button type="submit" class="btn btn-primary" id="analyze-btn">🔍 Analyze and Rank</button>
     </div>
     <p class="text-muted">
       Enter one keyword-weight pair per line (e.g., <code>just transition:3</code>).
@@ -38,7 +38,7 @@
     </p>
     <div class="mb-3">
       <textarea name="weights" class="form-control" rows="5" placeholder="just transition:3&#10;steel*:2"
-        required>{{ weights_text or '' }}</textarea>
+        {% if not semantic_enabled %}required{% endif %}>{{ weights_text or '' }}</textarea>
     </div>
 
     <!-- ⚖️ Field Weights -->
@@ -56,6 +56,27 @@
       {% endfor %}
     </div>
 
+    {% if semantic_enabled %}
+    <!-- 🧠 Semantic Ranking -->
+    <h5 class="mt-4">🧠 Research Question <span class="badge bg-secondary">optional</span></h5>
+    <p class="text-muted">
+      Describe what you are looking for in one sentence (English works best). Each entry's title and abstract get a
+      <em>similarity</em> score from 0 to 1, which finds relevant papers even when they don't use your keywords.
+      Up to {{ semantic_max }} entries per file; the first run on a file can take a while.
+    </p>
+    <div class="mb-3">
+      <textarea name="question" class="form-control" rows="2" maxlength="1000"
+        placeholder="How do steel-producing regions protect workers during decarbonization?">{{ question or '' }}</textarea>
+    </div>
+    <div class="mb-3 d-flex align-items-center gap-2">
+      <label class="form-label mb-0" for="rank_by">Rank by</label>
+      <select class="form-select w-auto" id="rank_by" name="rank_by">
+        <option value="score" {% if rank_by != 'similarity' %}selected{% endif %}>Keyword score</option>
+        <option value="similarity" {% if rank_by == 'similarity' %}selected{% endif %}>Similarity to research question</option>
+      </select>
+    </div>
+    {% endif %}
+
     {% if rows %}
     <!-- 📊 Ranking Preview -->
     <h3 class="mt-4">📊 Ranking</h3>
@@ -70,6 +91,7 @@
           <tr>
             <th>#</th>
             <th>Score</th>
+            {% if has_similarity %}<th>Similarity</th>{% endif %}
             <th>Title</th>
             <th>Matched</th>
           </tr>
@@ -79,6 +101,7 @@
           <tr>
             <td class="text-muted">{{ r.rank }}</td>
             <td><strong>{{ r.score }}</strong></td>
+            {% if has_similarity %}<td>{{ r.similarity }}</td>{% endif %}
             <td>
               {% if r.abstract %}
               <details>
@@ -115,4 +138,14 @@
 
   </form>
 </div>
+
+<script>
+  // 打分可能要一会儿（尤其是语义打分），提交后禁用按钮并提示
+  document.querySelector("form").addEventListener("submit", function (e) {
+    if (e.submitter && e.submitter.id === "analyze-btn") {
+      e.submitter.disabled = true;
+      e.submitter.textContent = "⏳ Ranking…";
+    }
+  });
+</script>
 {% endblock %}
