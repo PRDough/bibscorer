@@ -5,6 +5,7 @@
   <input type="hidden" name="token" value="{{ token }}">
   <input type="hidden" name="uploaded_filename" value="{{ uploaded_filename or '' }}">
   <input type="hidden" name="source" value="{{ source or '' }}">
+  <input type="hidden" name="upload_note" value="{{ upload_note or '' }}">
   {% endif %}
 
   {% if error %}
@@ -15,13 +16,17 @@
   <section class="step">
     <div class="num" aria-hidden="true">1</div>
     <div>
-      <label class="label" for="bibfile">Reference file</label>
-      <input type="file" id="bibfile" name="bibfile" accept=".bib,.xml">
+      <label class="label" for="bibfile">Reference files</label>
+      <input type="file" id="bibfile" name="bibfile" accept=".bib,.xml" multiple>
       {% if uploaded_filename %}
-      <p class="note">Uploaded: <strong>{{ uploaded_filename }}</strong>. Leave empty to re-rank the current file with new weights.</p>
+      <p class="note">
+        Uploaded: <strong>{{ uploaded_filename }}</strong>.{% if upload_note %} {{ upload_note }}.{% endif %}
+        Leave empty to re-rank the current entries with new weights.
+      </p>
       {% else %}
       <p class="note">
-        BibTeX (.bib) or XML exported from EBSCO. UTF-8, up to 10 MB.
+        BibTeX (.bib) or XML exported from EBSCO. Select several files to combine them; duplicates
+        (same DOI, or same title) are removed. UTF-8, up to 10 MB in total.
         Your entries are kept for one hour so you can re-rank and export, then deleted.
       </p>
       {% endif %}
@@ -173,7 +178,12 @@
 
     <fieldset class="export-group" id="bib-group">
       <legend>BibTeX options</legend>
-      {% if source == 'ebsco' %}
+      {% if source == 'mixed' %}
+      <p class="note">
+        Entries from .bib files are exported exactly as uploaded. Entries from EBSCO XML are converted
+        and have no journal name, so you may need to fill it in after importing.
+      </p>
+      {% elif source == 'ebsco' %}
       <p class="note">
         Converted from EBSCO XML: title, authors, year, abstract, DOI, URL and publisher.
         EBSCO exports don't include the journal name, so you may need to fill it in after importing.

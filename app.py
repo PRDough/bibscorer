@@ -14,7 +14,7 @@ from bibtexparser.bwriter import BibTexWriter
 from werkzeug.utils import secure_filename
 
 import semantic
-from importers import UnsupportedFile, looks_like_xml, parse_ebsco_xml
+from importers import UnsupportedFile, looks_like_xml, merge_entries, parse_ebsco_xml
 from scoring import (SCORED_FIELDS, clean_text, keyword_pattern, parse_field_weights,
                      parse_weights, score_dataframe)
 
@@ -27,6 +27,8 @@ OUTPUT_FOLDER = 'output'
 RESULT_TTL = 60 * 60
 # 网页上最多显示多少条排名
 PREVIEW_LIMIT = 100
+# 一次最多上传几个文件
+MAX_FILES = 20
 # 研究问题最长字数
 QUESTION_MAX_LENGTH = 1000
 # 导出格式：(扩展名, MIME 类型)
@@ -49,13 +51,14 @@ FIELD_LABELS = {
     'month': "Month", 'note': "Note", 'language': "Language",
     'ENTRYTYPE': "Entry type", 'ID': "Citation key",
     'accessionnumber': "EBSCO accession number", 'database': "Source database",
+    'source_file': "Source file",
     'score': "Keyword score", 'matched_keywords': "Matched keywords", 'similarity': "Similarity",
 }
 # 常用字段排在前面，其余按原顺序跟在后面
 FIELD_ORDER = ['title', 'author', 'year', 'month', 'journal', 'booktitle', 'score', 'similarity',
                'matched_keywords', 'abstract', 'keywords', 'doi', 'url', 'publisher', 'ID', 'ENTRYTYPE']
 # 排在最后的字段
-FIELD_ORDER_LAST = ['database', 'accessionnumber']
+FIELD_ORDER_LAST = ['source_file', 'database', 'accessionnumber']
 
 
 def field_label(name):
@@ -193,7 +196,7 @@ def render_index(**kwargs):
                    default_field_weights=SCORED_FIELDS, export_fields=[],
                    question="", rank_by="score", has_similarity=False,
                    export_format="csv", export_scope="all", top_n="", min_value="", bib_note=False,
-                   checked_fields=[], source=None,
+                   checked_fields=[], source=None, upload_note="",
                    semantic_enabled=semantic.is_enabled(), semantic_max=semantic.MAX_ENTRIES)
     context.update(kwargs)
     return render_template("index.html", **context)
@@ -212,31 +215,49 @@ def render_results(df, token, weights, **kwargs):
     )
 
 
-# 读取上传的文件（BibTeX 或 EBSCO XML，按内容自动识别）；
-# 返回 (清洗后的表, 原始条目, 来源格式, 错误信息)
-def read_upload(upload):
+# 读取一个上传的文件（BibTeX 或 EBSCO XML，按内容自动识别）；
+# 返回 (原始条目, 来源格式, 错误信息)
+def parse_upload(upload):
     # 直接在内存中解析，不把上传文件留在服务器上
     try:
         text = upload.read().decode("utf-8-sig")
     except UnicodeDecodeError:
-        return None, None, None, "The file is not valid UTF-8 text."
+        return None, None, "The file is not valid UTF-8 text."
 
     if looks_like_xml(text):
-        source = "ebsco"
         try:
             entries = parse_ebsco_xml(text)
         except UnsupportedFile as e:
-            return None, None, None, str(e)
+            return None, None, str(e)
+        source = "ebsco"
     else:
-        source = "bibtex"
         try:
             entries = bibtexparser.loads(text).entries
         except Exception:
-            return None, None, None, "Could not parse the file as BibTeX."
+            return None, None, "Could not parse the file as BibTeX."
+        source = "bibtex"
 
     if not entries:
-        return None, None, None, "No references were found in the file."
+        return None, None, "No references were found in the file."
+    return entries, source, None
+
+
+# 读取所有上传的文件，合并去重；返回 (清洗后的表, 原始条目, 来源格式, 上传说明, 错误信息)
+def read_uploads(uploads):
+    files, sources, counts = [], set(), []
+    for upload in uploads:
+        name = secure_filename(upload.filename) or "file"
+        entries, source, error = parse_upload(upload)
+        if error:
+            # 只传了一个文件时不用在错误前面加文件名
+            return None, None, None, None, error if len(uploads) == 1 else f"{name}: {error}"
+        files.append((name, entries))
+        sources.add(source)
+        counts.append(f"{name}: {len(entries)}")
+
+    entries, source_files, removed = merge_entries(files)
     df = pd.DataFrame(entries).fillna("")
+    df['source_file'] = source_files
 
     # 清洗字段
     for col in SCORED_FIELDS:
@@ -244,7 +265,15 @@ def read_upload(upload):
             df[col] = df[col].apply(clean_text)
         else:
             df[col] = ""
-    return df, entries, source, None
+
+    note = ""
+    if len(uploads) > 1 or removed:
+        parts = counts if len(uploads) > 1 else []
+        if removed:
+            parts.append(f"{removed} duplicate{'s' if removed != 1 else ''} removed")
+        note = " · ".join(parts)
+    source = sources.pop() if len(sources) == 1 else "mixed"
+    return df, entries, source, note, None
 
 
 def form_state(form):
@@ -272,15 +301,18 @@ def index():
     weights = parse_weights(state['weights_text'])
     question = state['question'] if semantic.is_enabled() else ""
 
-    bib_file = request.files.get("bibfile")
-    if bib_file and bib_file.filename:
-        filename = secure_filename(bib_file.filename)
-        base, raw_entries, source, error = read_upload(bib_file)
+    uploads = [f for f in request.files.getlist("bibfile") if f and f.filename]
+    if len(uploads) > MAX_FILES:
+        return render_index(error=f"Upload at most {MAX_FILES} files at a time.", **state)
+    if uploads:
+        filename = ", ".join(secure_filename(f.filename) or "file" for f in uploads)
+        base, raw_entries, source, upload_note, error = read_uploads(uploads)
         token = uuid.uuid4().hex
     else:
         # 没有选新文件时，对上次上传的数据重新打分
         filename = request.form.get("uploaded_filename")
         source = request.form.get("source")
+        upload_note = request.form.get("upload_note", "")
         token = request.form.get("token")
         base = load_csv(token, ".base.csv")
         error = None if base is not None else "Please choose a .bib file to upload."
@@ -297,7 +329,7 @@ def index():
                                   f"this file has {len(base)}. Clear the research question to rank by keywords only.",
                             **state)
 
-    if bib_file and bib_file.filename:
+    if uploads:
         save_csv(base, token, ".base.csv")
         save_raw_entries(raw_entries, token)
     else:
@@ -322,7 +354,8 @@ def index():
     df_sorted = df.sort_values(order, ascending=False, kind='stable')
     save_csv(df_sorted, token, keep_row=True)
 
-    return render_results(df_sorted, token, weights, uploaded_filename=filename, source=source, **state)
+    return render_results(df_sorted, token, weights, uploaded_filename=filename, source=source,
+                          upload_note=upload_note, **state)
 
 
 # 导出时按哪一列筛选“不低于某个值”：跟当前的排序方式一致
@@ -412,6 +445,7 @@ def download():
             df, token, parse_weights(state['weights_text']),
             uploaded_filename=request.form.get("uploaded_filename"),
             source=request.form.get("source"),
+            upload_note=request.form.get("upload_note", ""),
             error=message,
             **state,
         )

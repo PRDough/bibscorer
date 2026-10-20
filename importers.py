@@ -106,3 +106,73 @@ def parse_ebsco_xml(text):
     if root.tag.split('}')[-1] != 'records' or not records:
         raise UnsupportedFile("Unsupported XML format. BibScorer reads XML exported from EBSCO.")
     return _unique_keys([_ebsco_record(r) for r in records])
+
+
+# --- 合并多个文件 ---
+
+def _doi_key(entry):
+    doi = entry.get('doi', '').strip().lower()
+    doi = re.sub(r'^(https?://(dx\.)?doi\.org/|doi:\s*)', '', doi)
+    return doi or None
+
+
+def _title_key(entry):
+    # 去掉 LaTeX 花括号、标点和大小写差异；标题太短时再加上第一作者的姓，避免把不同的文章当成重复
+    title = re.sub(r'[^a-z0-9]', '', unicodedata.normalize('NFKD', entry.get('title', '')).lower())
+    if not title:
+        return None
+    if len(title) < 30:
+        first_author = entry.get('author', '').split(' and ')[0].split(',')[0]
+        title += '|' + _ascii_word(first_author)
+    return title
+
+
+def _completeness(entry):
+    return sum(1 for k, v in entry.items() if k not in ('ID', 'ENTRYTYPE') and str(v).strip())
+
+
+def merge_entries(files):
+    """合并多个文件的条目并去重。
+
+    files: [(文件名, 条目列表), …]
+    返回 (条目列表, 每条对应的来源文件名, 去掉的重复数)。
+    同一篇文献（DOI 相同，或没有 DOI 时标题相同）只保留字段最完整的那个版本，
+    位置按它第一次出现的地方；来源文件名会合并成 "a.bib; b.xml"。
+    """
+    merged, sources, index = [], [], {}
+    removed = 0
+    for filename, entries in files:
+        for entry in entries:
+            keys = [k for k in (('doi', _doi_key(entry)), ('title', _title_key(entry))) if k[1]]
+            position = next((index[k] for k in keys if k in index), None)
+            if position is None:
+                index.update({k: len(merged) for k in keys})
+                merged.append(entry)
+                sources.append([filename])
+                continue
+            removed += 1
+            if filename not in sources[position]:
+                sources[position].append(filename)
+            if _completeness(entry) > _completeness(merged[position]):
+                merged[position] = entry
+            index.update({k: position for k in keys})
+
+    # 不同文件里可能有相同的引用键（比如都有 smith2021），重复的加 a、b、c……
+    seen = {}
+    for i, entry in enumerate(merged):
+        key = entry.get('ID') or citation_key(entry)
+        if key in seen:
+            seen[key] += 1
+            suffix = seen[key]
+            new_key = key + (chr(ord('a') + suffix - 1) if suffix <= 26 else str(suffix))
+            while new_key in seen:
+                suffix += 1
+                new_key = key + (chr(ord('a') + suffix - 1) if suffix <= 26 else str(suffix))
+            seen[key] = suffix
+            seen[new_key] = 0
+            merged[i] = dict(entry, ID=new_key)
+        else:
+            seen[key] = 0
+            if entry.get('ID') != key:
+                merged[i] = dict(entry, ID=key)
+    return merged, ["; ".join(s) for s in sources], removed
