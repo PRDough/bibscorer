@@ -1,151 +1,214 @@
 {% extends "layout.html" %}
 {% block content %}
-<div class="container mt-5 text-center">
-  <h1>📚 Welcome to BibScorer!</h1>
-  <p class="lead">Upload a BibTeX file, set your custom keywords and weights, and rank your references.</p>
-</div>
+<form action="/" method="post" enctype="multipart/form-data" id="rank-form">
+  {% if token %}
+  <input type="hidden" name="token" value="{{ token }}">
+  <input type="hidden" name="uploaded_filename" value="{{ uploaded_filename or '' }}">
+  {% endif %}
 
-<!-- 📂 Upload Section -->
-<div class="container mt-4">
-  <h2>📂 Upload Your BibTeX File (.bib)</h2>
   {% if error %}
-  <div class="alert alert-danger">{{ error }}</div>
-  {% endif %}
-  {% if uploaded_filename %}
-  <p class="text-success">✅ Uploaded: {{ uploaded_filename }}</p>
+  <div class="error" role="alert">{{ error }}</div>
   {% endif %}
 
-  <form action="/" method="post" enctype="multipart/form-data">
-    {% if token %}
-    <input type="hidden" name="token" value="{{ token }}">
-    <input type="hidden" name="uploaded_filename" value="{{ uploaded_filename or '' }}">
-    {% endif %}
-    <div class="mb-3">
-      <input type="file" class="form-control" name="bibfile" accept=".bib">
-      {% if token %}
-      <div class="form-text">Leave empty to re-rank the current file with new weights.</div>
+  <!-- 1. 上传文件 -->
+  <section class="step">
+    <div class="num" aria-hidden="true">1</div>
+    <div>
+      <label class="label" for="bibfile">BibTeX file (.bib)</label>
+      <input type="file" id="bibfile" name="bibfile" accept=".bib">
+      {% if uploaded_filename %}
+      <p class="note">Uploaded: <strong>{{ uploaded_filename }}</strong>. Leave empty to re-rank the current file with new weights.</p>
+      {% else %}
+      <p class="note">UTF-8, up to 10 MB. Your entries are kept for one hour so you can re-rank and export, then deleted.</p>
       {% endif %}
     </div>
+  </section>
 
-    <!-- 🎯 Keyword Weighting Section -->
-    <div class="d-flex justify-content-between align-items-center mt-4">
-      <h3 class="mb-0">🎯 Define Your Keywords and Weights</h3>
-      <button type="submit" class="btn btn-primary" id="analyze-btn">🔍 Analyze and Rank</button>
-    </div>
-    <p class="text-muted">
-      Enter one keyword-weight pair per line (e.g., <code>just transition:3</code>).
-      Keywords match whole words only; add <code>*</code> to match a prefix (<code>steel*</code> also matches "steelmaking").
-    </p>
-    <div class="mb-3">
-      <textarea name="weights" class="form-control" rows="5" placeholder="just transition:3&#10;steel*:2"
+  <!-- 2. 关键词和权重 -->
+  <section class="step">
+    <div class="num" aria-hidden="true">2</div>
+    <div>
+      <label class="label" for="weights">Keywords and weights</label>
+      <textarea id="weights" name="weights" rows="5" placeholder="just transition: 3&#10;steel*: 2"
         {% if not semantic_enabled %}required{% endif %}>{{ weights_text or '' }}</textarea>
-    </div>
+      <p class="note">
+        One <code>keyword: weight</code> per line. Keywords match whole words; add <code>*</code> to match a prefix
+        (<code>steel*</code> also matches "steelmaking"). Negative weights push entries down.
+      </p>
 
-    <!-- ⚖️ Field Weights -->
-    <h5 class="mt-3">⚖️ Field Multipliers</h5>
-    <p class="text-muted">Each match is worth <em>keyword weight × field multiplier</em>. Set a field to 0 to ignore it.</p>
-    <div class="row g-3 mb-3">
-      {% for field, value in field_weights.items() %}
-      <div class="col-sm-4">
-        <div class="input-group">
-          <label class="input-group-text text-capitalize" for="fw_{{ field }}">{{ field }} ×</label>
-          <input type="number" class="form-control" id="fw_{{ field }}" name="fw_{{ field }}"
-            value="{{ '%g' % value }}" min="0" step="0.5">
+      <details class="advanced" {% if field_weights != default_field_weights %}open{% endif %}>
+        <summary>Field multipliers</summary>
+        <p class="note">Each match is worth <em>keyword weight × field multiplier</em>. Set a field to 0 to ignore it.</p>
+        <div class="multipliers">
+          {% for field, value in field_weights.items() %}
+          <div>
+            <label for="fw_{{ field }}">{{ field|capitalize }} ×</label>
+            <input type="number" id="fw_{{ field }}" name="fw_{{ field }}" value="{{ '%g' % value }}" min="0" step="0.5">
+          </div>
+          {% endfor %}
         </div>
-      </div>
-      {% endfor %}
+      </details>
     </div>
+  </section>
 
-    {% if semantic_enabled %}
-    <!-- 🧠 Semantic Ranking -->
-    <h5 class="mt-4">🧠 Research Question <span class="badge bg-secondary">optional</span></h5>
-    <p class="text-muted">
-      Describe what you are looking for in one sentence (English works best). Each entry's title and abstract get a
-      <em>similarity</em> score from 0 to 1, which finds relevant papers even when they don't use your keywords.
-      Up to {{ semantic_max }} entries per file; the first run on a file can take a while.
-    </p>
-    <div class="mb-3">
-      <textarea name="question" class="form-control" rows="2" maxlength="1000"
+  {% if semantic_enabled %}
+  <!-- 3. 研究问题（语义打分） -->
+  <section class="step">
+    <div class="num" aria-hidden="true">3</div>
+    <div>
+      <label class="label" for="question">Research question <span class="optional">optional</span></label>
+      <textarea id="question" name="question" rows="2" maxlength="1000"
         placeholder="How do steel-producing regions protect workers during decarbonization?">{{ question or '' }}</textarea>
+      <p class="note">
+        One sentence, English works best. Each entry's title and abstract get a similarity score from 0 to 1,
+        which finds relevant papers even when they don't use your keywords. Up to {{ semantic_max }} entries per file;
+        the first run on a file can take a while.
+      </p>
+      <div class="inline">
+        <label for="rank_by">Rank by</label>
+        <select id="rank_by" name="rank_by">
+          <option value="score" {% if rank_by != 'similarity' %}selected{% endif %}>Keyword score</option>
+          <option value="similarity" {% if rank_by == 'similarity' %}selected{% endif %}>Similarity to research question</option>
+        </select>
+      </div>
     </div>
-    <div class="mb-3 d-flex align-items-center gap-2">
-      <label class="form-label mb-0" for="rank_by">Rank by</label>
-      <select class="form-select w-auto" id="rank_by" name="rank_by">
-        <option value="score" {% if rank_by != 'similarity' %}selected{% endif %}>Keyword score</option>
-        <option value="similarity" {% if rank_by == 'similarity' %}selected{% endif %}>Similarity to research question</option>
-      </select>
-    </div>
-    {% endif %}
+  </section>
+  {% endif %}
 
-    {% if rows %}
-    <!-- 📊 Ranking Preview -->
-    <h3 class="mt-4">📊 Ranking</h3>
-    <p class="text-muted">
-      {{ matched }} of {{ total }} entries matched at least one keyword.
+  <!-- 排序按钮 -->
+  <section class="step step-action">
+    <div class="num" aria-hidden="true">{{ 4 if semantic_enabled else 3 }}</div>
+    <div>
+      <button type="submit" class="btn-primary" id="analyze-btn">Rank references →</button>
+    </div>
+  </section>
+
+  {% if rows %}
+  <!-- 排名结果 -->
+  <section class="results" aria-labelledby="ranking-title">
+    <!-- 黑色通栏：把上面的操作区和下面的结果明确分开 -->
+    <div class="results-band" id="results">
+      <p class="band-kicker">Results{% if uploaded_filename %} · {{ uploaded_filename }}{% endif %}</p>
+      <h2 class="band-title" id="ranking-title">Ranking</h2>
+      <p class="band-stats">
+        <span><strong>{{ matched }}</strong> of {{ total }} entries matched at least one keyword</span>
+        {% if has_similarity %}<span>Sorted by {{ 'similarity' if rank_by == 'similarity' else 'keyword score' }}</span>{% endif %}
+        <a href="#export-title">Export ↓</a>
+      </p>
+    </div>
+    <p class="note">
       {% if total > rows|length %}Showing the top {{ rows|length }}; the CSV export includes all entries.{% endif %}
       Click a title to see its abstract.
     </p>
-    <div class="table-responsive mb-4">
-      <table class="table table-sm table-hover align-top">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Score</th>
-            {% if has_similarity %}<th>Similarity</th>{% endif %}
-            <th>Title</th>
-            <th>Matched</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in rows %}
-          <tr>
-            <td class="text-muted">{{ r.rank }}</td>
-            <td><strong>{{ r.score }}</strong></td>
-            {% if has_similarity %}<td>{{ r.similarity }}</td>{% endif %}
-            <td>
-              {% if r.abstract %}
-              <details>
-                <summary>{{ r.title or '(untitled)' }}</summary>
-                <p class="small mt-2 mb-0">{{ r.abstract }}</p>
-              </details>
-              {% else %}
-              {{ r.title or '(untitled)' }}
-              {% endif %}
-              <div class="small text-muted">{{ r.authors }}{% if r.authors and r.year %}, {% endif %}{{ r.year }}</div>
-            </td>
-            <td class="small">{{ r.matches or '—' }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
-
-    {% if headers and token %}
-    <!-- 📌 Field Selection Section -->
-    <h3 class="mt-4">📌 Select Fields to Include in CSV Output</h3>
-    <p class="text-muted">Check the fields you want to include in the final export</p>
-    <div class="mb-3 text-start">
-      {% for h in headers %}
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="fields" value="{{ h }}" id="field_{{ loop.index }}">
-        <label class="form-check-label" for="field_{{ loop.index }}">{{ h }}</label>
-      </div>
+    <ol class="ranking">
+      {% for r in rows %}
+      <li class="entry">
+        <div class="score">
+          <span class="rank">#{{ r.rank }}</span>
+          <strong>{{ r.score }}</strong>
+          {% if has_similarity %}<span class="sim">Similarity {{ r.similarity }}</span>{% endif %}
+        </div>
+        <div>
+          {% if r.abstract %}
+          <details>
+            <summary class="title">{{ r.title or '(untitled)' }}</summary>
+            <p class="abstract">{{ r.abstract }}</p>
+          </details>
+          {% else %}
+          <div class="title">{{ r.title or '(untitled)' }}</div>
+          {% endif %}
+          <div class="meta">
+            {{ r.authors }}{% if r.authors and r.year %}, {% endif %}{{ r.year }}
+            {% if (r.authors or r.year) %} · {% endif %}{{ r.matches or 'No keyword matches' }}
+          </div>
+        </div>
+      </li>
       {% endfor %}
-    </div>
-    <button formaction="/download" formmethod="post" class="btn btn-success mt-3">⬇️ Download Selected Fields</button>
-    {% endif %}
+    </ol>
+  </section>
+  {% endif %}
 
-  </form>
-</div>
+  {% if headers and token %}
+  <!-- 导出 -->
+  {% set metric_label = 'similarity' if (rank_by == 'similarity' and has_similarity) else 'keyword score' %}
+  <section class="export" aria-labelledby="export-title">
+    <h2 class="section-title" id="export-title">Export</h2>
+
+    <fieldset class="export-group">
+      <legend>Format</legend>
+      <label><input type="radio" name="export_format" value="csv" {% if export_format == 'csv' %}checked{% endif %}> CSV</label>
+      <label><input type="radio" name="export_format" value="xlsx" {% if export_format == 'xlsx' %}checked{% endif %}> Excel (.xlsx)</label>
+      <label><input type="radio" name="export_format" value="bib" {% if export_format == 'bib' %}checked{% endif %}> BibTeX (.bib) <span class="hint">for Zotero, EndNote, Mendeley</span></label>
+    </fieldset>
+
+    <fieldset class="export-group">
+      <legend>Entries</legend>
+      <label><input type="radio" name="export_scope" value="all" {% if export_scope == 'all' %}checked{% endif %}> All {{ total }} entries</label>
+      <label class="with-input">
+        <input type="radio" name="export_scope" value="top" {% if export_scope == 'top' %}checked{% endif %}> Top
+        <input type="number" name="top_n" value="{{ top_n }}" min="1" step="1" placeholder="20" aria-label="Number of top entries" data-scope="top">
+        entries
+      </label>
+      <label class="with-input">
+        <input type="radio" name="export_scope" value="min" {% if export_scope == 'min' %}checked{% endif %}> {{ metric_label|capitalize }} at least
+        <input type="number" name="min_value" value="{{ min_value }}" step="any" placeholder="{{ '0.5' if metric_label == 'similarity' else '5' }}" aria-label="Minimum {{ metric_label }}" data-scope="min">
+      </label>
+      <p class="note">Entries are exported in ranking order.</p>
+    </fieldset>
+
+    <fieldset class="export-group" id="fields-group">
+      <legend>Fields <span class="hint">CSV and Excel</span></legend>
+      <div class="fields">
+        {% for name, label in export_fields %}
+        <label for="field_{{ loop.index }}">
+          <input type="checkbox" name="fields" value="{{ name }}" id="field_{{ loop.index }}" {% if name in checked_fields %}checked{% endif %}>{{ label }}
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <fieldset class="export-group" id="bib-group">
+      <legend>BibTeX options</legend>
+      <p class="note">BibTeX files always contain the complete original entries, exactly as uploaded.</p>
+      <label><input type="checkbox" name="bib_note" value="1" {% if bib_note %}checked{% endif %}> Add the rank and score to each entry's note field (Zotero imports it as a note)</label>
+    </fieldset>
+
+    <button formaction="/download" formmethod="post" class="btn-secondary">Download</button>
+  </section>
+  {% endif %}
+</form>
 
 <script>
   // 打分可能要一会儿（尤其是语义打分），提交后禁用按钮并提示
-  document.querySelector("form").addEventListener("submit", function (e) {
+  document.getElementById("rank-form").addEventListener("submit", function (e) {
     if (e.submitter && e.submitter.id === "analyze-btn") {
       e.submitter.disabled = true;
-      e.submitter.textContent = "⏳ Ranking…";
+      e.submitter.textContent = "Ranking…";
     }
+  });
+  // 导出：BibTeX 不用选字段；在数字框里输入时自动选中对应的范围
+  var form = document.getElementById("rank-form");
+  function syncExport() {
+    var fmt = form.querySelector('input[name="export_format"]:checked');
+    var isBib = fmt && fmt.value === "bib";
+    var fields = document.getElementById("fields-group");
+    var bib = document.getElementById("bib-group");
+    if (fields) fields.disabled = isBib;
+    if (bib) bib.hidden = !isBib;
+  }
+  form.querySelectorAll('input[name="export_format"]').forEach(function (r) { r.addEventListener("change", syncExport); });
+  form.querySelectorAll("[data-scope]").forEach(function (input) {
+    input.addEventListener("focus", function () {
+      form.querySelector('input[name="export_scope"][value="' + input.dataset.scope + '"]').checked = true;
+    });
+  });
+  syncExport();
+
+  // 浏览器后退回到页面时恢复按钮
+  window.addEventListener("pageshow", function () {
+    var btn = document.getElementById("analyze-btn");
+    btn.disabled = false;
+    btn.textContent = "Rank references →";
   });
 </script>
 {% endblock %}

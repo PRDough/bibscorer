@@ -27,7 +27,11 @@ BibScorer is a small Flask web app that ranks the references in a BibTeX file by
 3. **Set field multipliers** (default: title ×3, keywords ×2, abstract ×1). A match in the title then counts three times as much as one in the abstract. Set a field to 0 to ignore it.
 4. **Scoring.** Each match adds *keyword weight × field multiplier*. Entries are sorted by total score, highest first.
 5. **Review the ranking** on the page. The top 100 entries are shown with their score, matched keywords and highlighted titles. Click a title to see its abstract. To try different weights, edit them and click **Analyze and Rank** again; there's no need to re-upload.
-6. **Export.** Tick the fields you want (e.g. `title`, `author`, `year`, `score`, `matched_keywords`) and download them as `filtered_output.csv`.
+6. **Export** in three formats:
+   - **CSV** or **Excel (.xlsx)**: pick the fields you want. Column headers use readable names, such as `Citation key` for the BibTeX key. The CSV is UTF-8 with a BOM, so Excel shows accents and symbols correctly. In the Excel file, scores are stored as numbers and the header row is frozen.
+   - **BibTeX (.bib)**: re-import the ranked references into Zotero, EndNote or Mendeley. The file contains the complete original entries exactly as uploaded, including LaTeX and braces. Optionally, the rank and score can be added to each entry's `note` field.
+
+   Export all entries, only the **top N**, or only those with a **score at least X**. When ranking by similarity, the minimum applies to similarity instead.
 
 Before scoring, BibScorer strips common BibTeX/LaTeX markup from those three fields, such as braces, `$...$` math and escaped characters. For example, `CO$_2$` becomes `CO2`.
 
@@ -42,8 +46,8 @@ Keywords miss papers that describe the same idea in different words. You can als
 
 ### Privacy
 
-- Uploaded `.bib` files are parsed in memory and never written to disk.
-- Each upload's data and results are saved under a random ID in `output/`, so users can't see each other's data. They are deleted after one hour of inactivity.
+- The uploaded `.bib` file itself is parsed in memory and not saved.
+- Each upload's data (the parsed entries and the cleaned text) and results are saved under a random ID in `output/`, so users can't see each other's data. They are deleted after one hour of inactivity.
 
 ### Run locally
 
@@ -95,8 +99,9 @@ The repository includes a `render.yaml` blueprint. In Render, choose **New → B
 app.py                 Flask app: upload, ranking page and CSV download
 scoring.py             Keyword scoring: text cleaning, weight parsing, whole-word matching
 semantic.py            Semantic ranking with a local embedding model
-templates/layout.html  Base layout (Bootstrap 5)
+templates/layout.html  Base layout
 templates/index.html   Upload, weights, ranking and field-selection page
+static/style.css       Black-and-white stylesheet (Optima + Baskerville)
 tests/                 pytest suite
 requirements.txt       Python dependencies (requirements-dev.txt adds pytest)
 render.yaml            Render deployment config
@@ -131,7 +136,11 @@ BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键
 3. **设置字段系数**（默认：标题 ×3、keywords ×2、摘要 ×1）。这样同一个关键词出现在标题里，得分是出现在摘要里的 3 倍。某个字段设为 0 就不参与打分。
 4. **打分规则**：每命中一次，加 *关键词权重 × 字段系数*。结果按总分从高到低排列。
 5. **在网页上查看排名**：显示前 100 篇的分数、命中的关键词，标题里命中的词会高亮。点击标题可以展开摘要。想换权重试试，改完直接再点 **Analyze and Rank**，不用重新上传。
-6. **导出**：勾选需要的字段（如 `title`、`author`、`year`、`score`、`matched_keywords`），下载为 `filtered_output.csv`。
+6. **导出**，支持三种格式：
+   - **CSV** 或 **Excel (.xlsx)**：勾选需要的字段。表头用易读的名称，比如 BibTeX 引用键对应 `Citation key`。CSV 是带 BOM 的 UTF-8，用 Excel 打开时重音字母和符号也能正常显示。Excel 文件里的分数存成数字，首行冻结。
+   - **BibTeX (.bib)**：把排好序的文献导回 Zotero、EndNote 或 Mendeley。文件里是上传时的完整原始条目，LaTeX 和花括号都原样保留。可以选择把排名和分数写进每条文献的 `note` 字段。
+
+   可以导出全部、只导出**前 N 篇**，或者只导出**分数不低于某个值**的。按相似度排序时，这个下限就改成针对相似度。
 
 打分前，程序会先清理这三个字段里常见的 BibTeX/LaTeX 符号，比如花括号、`$...$` 公式和转义字符。例如 `CO$_2$` 会变成 `CO2`。
 
@@ -146,8 +155,8 @@ BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键
 
 ### 隐私
 
-- 上传的 `.bib` 文件只在内存中解析，不会存到磁盘。
-- 每次上传的数据和结果以随机编号单独存放在 `output/` 下，用户之间互相看不到。一小时没有使用就会自动删除。
+- 上传的 `.bib` 文件本身只在内存中解析，不会保存。
+- 每次上传的数据（解析出的条目和清洗后的文本）和结果以随机编号单独存放在 `output/` 下，用户之间互相看不到。一小时没有使用就会自动删除。
 
 ### 本地运行
 
@@ -199,8 +208,9 @@ pytest
 app.py                 Flask 主程序：上传、排名页面和 CSV 下载
 scoring.py             关键词打分：文本清理、权重解析、整词匹配
 semantic.py            用本地向量模型做语义打分
-templates/layout.html  基础布局（Bootstrap 5）
+templates/layout.html  基础布局
 templates/index.html   上传、权重、排名和字段选择页面
+static/style.css       黑白样式表（Optima + Baskerville）
 tests/                 pytest 测试
 requirements.txt       Python 依赖（requirements-dev.txt 额外包含 pytest）
 render.yaml            Render 部署配置
