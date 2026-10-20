@@ -156,7 +156,7 @@ def test_upload_errors(client):
 
     assert "choose a .bib" in post({"weights": WEIGHTS})
     assert "UTF-8" in post({"weights": WEIGHTS, "bibfile": (io.BytesIO(b"\xff\xfe\x00"), "x.bib")})
-    assert "No BibTeX entries" in post({"weights": WEIGHTS, "bibfile": (io.BytesIO(b"hello"), "x.bib")})
+    assert "No references were found" in post({"weights": WEIGHTS, "bibfile": (io.BytesIO(b"hello"), "x.bib")})
     assert "at least one valid" in post({"weights": "nonsense", "bibfile": (io.BytesIO(b"@article{a, title={x}}"), "x.bib")})
 
 
@@ -168,8 +168,11 @@ def test_expired_results_are_removed(client, sample_bib, monkeypatch):
 
 
 def test_export_fields_have_readable_names_and_order():
-    fields = app_module.export_fields(["keywords", "abstract", "year", "author", "title", "ENTRYTYPE", "ID",
-                                       "web_of_science_categories", "score", "matched_keywords", "similarity"])
+    import pandas as pd
+    columns = ["keywords", "abstract", "year", "author", "title", "ENTRYTYPE", "ID",
+               "web_of_science_categories", "score", "matched_keywords", "similarity", "empty_field"]
+    df = pd.DataFrame([{c: ("" if c == "empty_field" else "x") for c in columns}])
+    fields = app_module.export_fields(df)
     assert fields == [
         ("title", "Title"), ("author", "Authors"), ("year", "Year"), ("score", "Keyword score"),
         ("similarity", "Similarity"), ("matched_keywords", "Matched keywords"), ("abstract", "Abstract"),

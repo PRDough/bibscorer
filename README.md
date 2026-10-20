@@ -6,7 +6,7 @@
 
 ## English
 
-BibScorer is a small Flask web app that ranks the references in a BibTeX file by keywords you choose. Upload a `.bib` file, give each keyword a weight, and download the ranked list as CSV.
+BibScorer is a small Flask web app that ranks your references by keywords you choose and by meaning. Upload a BibTeX file or an EBSCO XML export, give each keyword a weight, and download the ranked list as CSV, Excel or BibTeX.
 
 **Try it online: <https://bibscorer.onrender.com>**
 
@@ -14,7 +14,9 @@ BibScorer is a small Flask web app that ranks the references in a BibTeX file by
 
 ### How it works
 
-1. **Upload** a `.bib` file (UTF-8, up to 10 MB).
+1. **Upload** a reference file (UTF-8, up to 10 MB). The format is detected automatically:
+   - **BibTeX (.bib)**, from Zotero, Mendeley, Google Scholar and similar tools.
+   - **EBSCO XML**, from EBSCO's *Download → XML*. Titles, authors, dates, abstracts, DOIs, links and publishers are converted to BibTeX fields, and a citation key such as `han2026double` is generated for each record. EBSCO's XML has no keywords or journal names, so only the title and abstract are scored.
 2. **Define weights**, one `keyword:weight` pair per line. Weights are integers:
    ```
    just transition:3
@@ -54,8 +56,8 @@ Keywords miss papers that describe the same idea in different words. You can als
 Requires Python 3.10+.
 
 ```bash
-git clone https://github.com/PRDough/bibscore_web.git
-cd bibscore_web
+git clone https://github.com/PRDough/bibscorer.git
+cd bibscorer
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -98,6 +100,7 @@ The repository includes a `render.yaml` blueprint. In Render, choose **New → B
 ```
 app.py                 Flask app: upload, ranking page and CSV download
 scoring.py             Keyword scoring: text cleaning, weight parsing, whole-word matching
+importers.py           EBSCO XML import (parsed safely with defusedxml)
 semantic.py            Semantic ranking with a local embedding model
 templates/layout.html  Base layout
 templates/index.html   Upload, weights, ranking and field-selection page
@@ -115,7 +118,7 @@ render.yaml            Render deployment config
 
 ## 中文
 
-BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键词和权重给 BibTeX 文献打分、排序，并导出为 CSV。
+BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键词和权重、以及与研究问题的语义相似度，给文献打分排序。支持上传 BibTeX 文件或 EBSCO 导出的 XML，结果可以导出为 CSV、Excel 或 BibTeX。
 
 **在线使用：<https://bibscorer.onrender.com>**
 
@@ -123,7 +126,9 @@ BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键
 
 ### 使用方法
 
-1. **上传** `.bib` 文件（UTF-8 编码，最大 10 MB）。
+1. **上传**文献文件（UTF-8 编码，最大 10 MB），格式会自动识别：
+   - **BibTeX (.bib)**：Zotero、Mendeley、Google Scholar 等工具导出的文件。
+   - **EBSCO XML**：在 EBSCO 里用 *Download → XML* 导出的文件。标题、作者、日期、摘要、DOI、链接和出版商会转换成 BibTeX 字段，并为每条记录生成一个引用键，比如 `han2026double`。EBSCO 的 XML 里没有关键词和期刊名，所以只按标题和摘要打分。
 2. **设置权重**，每行一条 `关键词:权重`，权重为整数：
    ```
    just transition:3
@@ -163,8 +168,8 @@ BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键
 需要 Python 3.10 及以上版本。
 
 ```bash
-git clone https://github.com/PRDough/bibscore_web.git
-cd bibscore_web
+git clone https://github.com/PRDough/bibscorer.git
+cd bibscorer
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -207,6 +212,7 @@ pytest
 ```
 app.py                 Flask 主程序：上传、排名页面和 CSV 下载
 scoring.py             关键词打分：文本清理、权重解析、整词匹配
+importers.py           EBSCO XML 导入（用 defusedxml 安全解析）
 semantic.py            用本地向量模型做语义打分
 templates/layout.html  基础布局
 templates/index.html   上传、权重、排名和字段选择页面

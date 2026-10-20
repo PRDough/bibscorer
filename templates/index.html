@@ -4,6 +4,7 @@
   {% if token %}
   <input type="hidden" name="token" value="{{ token }}">
   <input type="hidden" name="uploaded_filename" value="{{ uploaded_filename or '' }}">
+  <input type="hidden" name="source" value="{{ source or '' }}">
   {% endif %}
 
   {% if error %}
@@ -14,12 +15,15 @@
   <section class="step">
     <div class="num" aria-hidden="true">1</div>
     <div>
-      <label class="label" for="bibfile">BibTeX file (.bib)</label>
-      <input type="file" id="bibfile" name="bibfile" accept=".bib">
+      <label class="label" for="bibfile">Reference file</label>
+      <input type="file" id="bibfile" name="bibfile" accept=".bib,.xml">
       {% if uploaded_filename %}
       <p class="note">Uploaded: <strong>{{ uploaded_filename }}</strong>. Leave empty to re-rank the current file with new weights.</p>
       {% else %}
-      <p class="note">UTF-8, up to 10 MB. Your entries are kept for one hour so you can re-rank and export, then deleted.</p>
+      <p class="note">
+        BibTeX (.bib) or XML exported from EBSCO. UTF-8, up to 10 MB.
+        Your entries are kept for one hour so you can re-rank and export, then deleted.
+      </p>
       {% endif %}
     </div>
   </section>
@@ -169,7 +173,14 @@
 
     <fieldset class="export-group" id="bib-group">
       <legend>BibTeX options</legend>
+      {% if source == 'ebsco' %}
+      <p class="note">
+        Converted from EBSCO XML: title, authors, year, abstract, DOI, URL and publisher.
+        EBSCO exports don't include the journal name, so you may need to fill it in after importing.
+      </p>
+      {% else %}
       <p class="note">BibTeX files always contain the complete original entries, exactly as uploaded.</p>
+      {% endif %}
       <label><input type="checkbox" name="bib_note" value="1" {% if bib_note %}checked{% endif %}> Add the rank and score to each entry's note field (Zotero imports it as a note)</label>
     </fieldset>
 
