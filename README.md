@@ -8,7 +8,7 @@
 
 BibScorer is a small Flask web app that ranks your references by keywords you choose and by meaning. Upload a BibTeX file or an EBSCO XML export, give each keyword a weight, and download the ranked list as CSV, Excel or BibTeX.
 
-**Try it online: <https://bibscorer.onrender.com>**
+**Try it online: <https://bibscorer.prdough.com>**
 
 > The site runs on Render's free plan, which puts it to sleep after about 15 minutes with no visitors. If nobody has used it recently, the first page load can take up to a minute while the server wakes up. Please wait and don't keep refreshing. After that it responds normally. If the page still doesn't load after a few minutes, refresh once, or [run it locally](#run-locally).
 
@@ -122,7 +122,7 @@ render.yaml            Render deployment config
 
 BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键词和权重、以及与研究问题的语义相似度，给文献打分排序。支持上传 BibTeX 文件或 EBSCO 导出的 XML，结果可以导出为 CSV、Excel 或 BibTeX。
 
-**在线使用：<https://bibscorer.onrender.com>**
+**在线使用：<https://bibscorer.prdough.com>**
 
 > 网站部署在 Render 免费版上，大约 15 分钟没人访问就会自动休眠。如果最近没人用过，第一次打开可能要等 1 分钟左右，服务器正在唤醒。请耐心等待，不要反复刷新。唤醒后就能正常使用。如果等了几分钟还打不开，刷新一次，或者按下面的方法[在本地运行](#本地运行)。
 
