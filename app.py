@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file
+from flask import Flask, g, render_template, request, send_file
 from markupsafe import Markup, escape
 import os
 import io
@@ -27,6 +27,8 @@ OUTPUT_FOLDER = 'output'
 RESULT_TTL = 60 * 60
 # 网页上最多显示多少条排名
 PREVIEW_LIMIT = 100
+# 访问统计：ANALYTICS_SRC（脚本地址）和 ANALYTICS_ID 都设置了才加载，且只在正式域名上发送数据
+ANALYTICS_DOMAIN = "bibscorer.prdough.com"
 # 一次最多上传几个文件
 MAX_FILES = 20
 # 研究问题最长字数
@@ -190,6 +192,43 @@ def semantic_similarities(base, token, question):
     return semantic.similarities(semantic.embed_query(question), vectors, texts)
 
 
+@app.context_processor
+def analytics():
+    src = os.environ.get("ANALYTICS_SRC", "").strip()
+    site_id = os.environ.get("ANALYTICS_ID", "").strip()
+    try:
+        site_id = str(uuid.UUID(site_id))
+    except ValueError:
+        site_id = ""
+    if not site_id or not src.startswith("https://"):
+        return dict(analytics=None)
+    return dict(analytics={"src": src, "id": site_id, "domain": ANALYTICS_DOMAIN})
+
+
+# 本次请求要在页面上记录的评分结果事件；只有提交评分（POST /）的响应才有。
+# score_started 在浏览器提交表单时发送，见 index.html。
+def score_event(context):
+    if request.endpoint != "index" or request.method != "POST":
+        return None
+    if context['error']:
+        name, data = "score_failed", {"reason": g.get("score_failure", "other")}
+    elif context['rows']:
+        name, data = "score_completed", {
+            "entries": context['total'],
+            "semantic": "yes" if context['has_similarity'] else "no",
+            "ranked_by": context['rank_by'],
+        }
+    else:
+        return None
+    # 每次响应一个唯一 id，浏览器据此避免同一次结果被重复记录（比如从缓存恢复页面）
+    return {"id": uuid.uuid4().hex, "name": name, "data": data}
+
+
+def score_failed(reason, message, state):
+    g.score_failure = reason
+    return render_index(error=message, **state)
+
+
 def render_index(**kwargs):
     context = dict(headers=None, weights_text="", uploaded_filename=None, token=None, error=None,
                    rows=None, total=0, matched=0, field_weights=dict(SCORED_FIELDS),
@@ -199,6 +238,7 @@ def render_index(**kwargs):
                    checked_fields=[], source=None, upload_note="",
                    semantic_enabled=semantic.is_enabled(), semantic_max=semantic.MAX_ENTRIES)
     context.update(kwargs)
+    context['score_event'] = score_event(context)
     return render_template("index.html", **context)
 
 
@@ -303,7 +343,7 @@ def index():
 
     uploads = [f for f in request.files.getlist("bibfile") if f and f.filename]
     if len(uploads) > MAX_FILES:
-        return render_index(error=f"Upload at most {MAX_FILES} files at a time.", **state)
+        return score_failed("too_many_files", f"Upload at most {MAX_FILES} files at a time.", state)
     if uploads:
         filename = ", ".join(secure_filename(f.filename) or "file" for f in uploads)
         base, raw_entries, source, upload_note, error = read_uploads(uploads)
@@ -320,14 +360,16 @@ def index():
             error = "Your previous upload has expired. Please upload the file again."
 
     if error:
-        return render_index(error=error, **state)
+        reason = "invalid_file" if uploads else ("expired" if token else "no_file")
+        return score_failed(reason, error, state)
     if not weights and not question:
-        return render_index(error="Enter at least one valid keyword:weight pair (weights must be integers)"
-                                  + (" or a research question." if semantic.is_enabled() else "."), **state)
+        return score_failed("no_keywords", "Enter at least one valid keyword:weight pair (weights must be integers)"
+                            + (" or a research question." if semantic.is_enabled() else "."), state)
     if question and len(base) > semantic.MAX_ENTRIES:
-        return render_index(error=f"Semantic ranking supports up to {semantic.MAX_ENTRIES} entries per file; "
-                                  f"this file has {len(base)}. Clear the research question to rank by keywords only.",
-                            **state)
+        return score_failed("too_many_entries",
+                            f"Semantic ranking supports up to {semantic.MAX_ENTRIES} entries per file; "
+                            f"this file has {len(base)}. Clear the research question to rank by keywords only.",
+                            state)
 
     if uploads:
         save_csv(base, token, ".base.csv")
@@ -342,8 +384,8 @@ def index():
             sims = semantic_similarities(base, token, question)
         except Exception:
             app.logger.exception("Semantic ranking failed")
-            return render_index(error="Semantic ranking is temporarily unavailable. Clear the research question "
-                                      "to rank by keywords only.", **state)
+            return score_failed("semantic_unavailable", "Semantic ranking is temporarily unavailable. "
+                                "Clear the research question to rank by keywords only.", state)
         df['similarity'] = np.round(sims.astype(float), 3)
 
     if 'similarity' in df.columns and state['rank_by'] == "similarity":
@@ -477,6 +519,7 @@ def download():
 
 @app.errorhandler(413)
 def file_too_large(e):
+    g.score_failure = "too_large"
     return render_index(error="The file is too large (limit: 10 MB)."), 413
 
 

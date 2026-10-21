@@ -200,13 +200,52 @@
 </form>
 
 <script>
+  // 使用统计：脚本没加载（未配置、被拦截、加载失败）时什么也不做，不影响任何功能
+  function trackEvent(name, data) {
+    try {
+      var tracker = window.umami;
+      if (tracker && typeof tracker.track === "function") tracker.track(name, data);
+    } catch (err) { /* 统计出错不能影响页面 */ }
+  }
+
   // 打分可能要一会儿（尤其是语义打分），提交后禁用按钮并提示
   document.getElementById("rank-form").addEventListener("submit", function (e) {
     if (e.submitter && e.submitter.id === "analyze-btn") {
+      var files = document.getElementById("bibfile").files;
+      var question = document.getElementById("question");
+      // 只在真正提交评分时记录开始（浏览器校验通过后才会触发 submit）
+      trackEvent("score_started", {
+        mode: files && files.length ? "upload" : "rerank",
+        semantic: question && question.value.trim() ? "yes" : "no"
+      });
+      try { sessionStorage.setItem("bibscorer_pending", "1"); } catch (err) {}
       e.submitter.disabled = true;
       e.submitter.textContent = "Ranking…";
     }
   });
+
+  // 服务器算完后，在结果页记录一次成功或失败；同一次结果只记一次
+  (function () {
+    var event = {{ score_event|tojson }};
+    if (!event) return;
+    function send() {
+      var key = "bibscorer_event_" + event.id;
+      var resubmitted = false;
+      try {
+        if (sessionStorage.getItem(key)) return;
+        sessionStorage.setItem(key, "1");
+        // 刷新结果页时浏览器会重新提交表单、重新评分，但不会触发 submit；
+        // 这时补记一次开始，保证“开始 → 完成”的转化率不超过 100%
+        resubmitted = !sessionStorage.getItem("bibscorer_pending");
+        sessionStorage.removeItem("bibscorer_pending");
+      } catch (err) { /* 无痕模式等情况下 sessionStorage 不可用，照常发送 */ }
+      if (resubmitted) trackEvent("score_started", { mode: "resubmit" });
+      trackEvent(event.name, event.data);
+    }
+    // 统计脚本是 defer 加载的，会在 DOMContentLoaded 之前执行完
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", send);
+    else send();
+  })();
   // 导出：BibTeX 不用选字段；在数字框里输入时自动选中对应的范围
   var form = document.getElementById("rank-form");
   function syncExport() {
