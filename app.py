@@ -1,4 +1,4 @@
-from flask import Flask, g, render_template, request, send_file
+from flask import Flask, Response, g, render_template, request, send_file
 from markupsafe import Markup, escape
 import os
 import io
@@ -21,6 +21,23 @@ from scoring import (SCORED_FIELDS, clean_text, keyword_pattern, parse_field_wei
 app = Flask(__name__)
 # 上传上限 10 MB
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
+# 已知 AI 爬虫和 AI 助手的 User-Agent 标识（不区分大小写，包含即拦截）。
+# 只能拦住如实声明身份的程序；伪装成普通浏览器的请求识别不了。
+BLOCKED_AI_AGENTS = (
+    # Anthropic
+    "ClaudeBot", "Claude-SearchBot", "Claude-User", "Claude-Web", "anthropic-ai",
+    # OpenAI
+    "GPTBot", "OAI-SearchBot", "ChatGPT-User", "OAI-AdsBot",
+    # Perplexity
+    "PerplexityBot", "Perplexity-User",
+    # 其他 AI / 数据采集
+    "Bytespider", "CCBot", "Meta-ExternalAgent", "Meta-ExternalFetcher", "cohere-ai",
+    # Google-Extended 和 Applebot-Extended 不是真实的 User-Agent，只在 robots.txt 里起作用
+    "Amazonbot", "Applebot-Extended", "Google-Extended", "Diffbot", "ImagesiftBot",
+    "Omgilibot", "Timpibot", "YouBot", "MistralAI-User",
+)
+_BLOCKED_AGENTS_LOWER = tuple(a.lower() for a in BLOCKED_AI_AGENTS)
 
 OUTPUT_FOLDER = 'output'
 # 结果文件保留时间（秒），过期自动删除
@@ -190,6 +207,26 @@ def semantic_similarities(base, token, question):
         os.makedirs(OUTPUT_FOLDER, exist_ok=True)
         np.save(path, vectors)
     return semantic.similarities(semantic.embed_query(question), vectors, texts)
+
+
+@app.before_request
+def block_ai_agents():
+    # robots.txt 对所有程序开放，好让遵守规则的爬虫读到“禁止抓取”
+    if request.path == "/robots.txt":
+        return None
+    user_agent = request.headers.get("User-Agent", "").lower()
+    if any(agent in user_agent for agent in _BLOCKED_AGENTS_LOWER):
+        return Response("Forbidden\n", status=403, mimetype="text/plain")
+    return None
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    lines = []
+    for agent in BLOCKED_AI_AGENTS:
+        lines += [f"User-agent: {agent}", "Disallow: /", ""]
+    lines += ["User-agent: *", "Allow: /", ""]
+    return Response("\n".join(lines), mimetype="text/plain")
 
 
 @app.context_processor
