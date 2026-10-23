@@ -320,28 +320,40 @@ def parse_upload(upload):
 
 
 # 读取所有上传的文件，合并去重；返回 (清洗后的表, 原始条目, 来源格式, 上传说明, 错误信息)
-def read_uploads(uploads):
+# 逐个解析上传的文件；返回 ([(文件名, 条目)], 来源格式集合, 每个文件的篇数说明, 错误信息)
+def parse_files(uploads):
     files, sources, counts = [], set(), []
     for upload in uploads:
         name = secure_filename(upload.filename) or "file"
         entries, source, error = parse_upload(upload)
         if error:
             # 只传了一个文件时不用在错误前面加文件名
-            return None, None, None, None, error if len(uploads) == 1 else f"{name}: {error}"
+            return None, None, None, error if len(uploads) == 1 else f"{name}: {error}"
         files.append((name, entries))
         sources.add(source)
         counts.append(f"{name}: {len(entries)}")
+    return files, sources, counts, None
 
-    entries, source_files, removed = merge_entries(files)
+
+# 合并后的条目转成表格：加上来源文件，清洗打分用的字段
+def build_table(entries, source_files):
     df = pd.DataFrame(entries).fillna("")
     df['source_file'] = source_files
-
-    # 清洗字段
     for col in SCORED_FIELDS:
         if col in df.columns:
             df[col] = df[col].apply(clean_text)
         else:
             df[col] = ""
+    return df
+
+
+def read_uploads(uploads):
+    files, sources, counts, error = parse_files(uploads)
+    if error:
+        return None, None, None, None, error
+
+    entries, source_files, removed = merge_entries(files)
+    df = build_table(entries, source_files)
 
     note = ""
     if len(uploads) > 1 or removed:
@@ -469,7 +481,7 @@ def csv_bytes(export):
     return buffer.getvalue()
 
 
-def excel_bytes(export):
+def excel_bytes(export, sheet_name="Ranking"):
     from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
     from openpyxl.utils import get_column_letter
 
@@ -481,8 +493,8 @@ def excel_bytes(export):
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        export.to_excel(writer, index=False, sheet_name="Ranking")
-        sheet = writer.sheets["Ranking"]
+        export.to_excel(writer, index=False, sheet_name=sheet_name)
+        sheet = writer.sheets[sheet_name]
         sheet.freeze_panes = "A2"
         for i, name in enumerate(export.columns, start=1):
             longest = max([len(str(name))] + [len(str(v)) for v in export[name].head(200)])
@@ -501,6 +513,10 @@ def bib_bytes(df, raw_entries, add_note):
                 text += f", similarity {record['similarity']}"
             entry['note'] = f"{entry['note']}; {text}" if entry.get('note') else text
         entries.append(entry)
+    return write_bib(entries)
+
+
+def write_bib(entries):
     database = BibDatabase()
     database.entries = entries
     writer = BibTexWriter()
@@ -552,6 +568,44 @@ def download():
     extension, mimetype = EXPORT_FORMATS[fmt]
     return send_file(io.BytesIO(data), mimetype=mimetype, as_attachment=True,
                      download_name=f"bibscore_ranking.{extension}")
+
+
+# 一键去重：把选中的文件合并、去重后直接下载（BibTeX、CSV 或 Excel），不打分、不保存任何数据。
+# 页面上用 fetch 调用，出错时返回纯文本说明；没有 JavaScript 时就是普通的表单下载。
+@app.route("/dedupe", methods=["POST"])
+def dedupe():
+    def fail(message):
+        if request.headers.get("X-Requested-With") == "fetch":
+            return Response(message, status=400, mimetype="text/plain")
+        return render_index(error=message, **form_state(request.form))
+
+    uploads = [f for f in request.files.getlist("bibfile") if f and f.filename]
+    if not uploads:
+        return fail("Choose the files to combine first.")
+    if len(uploads) > MAX_FILES:
+        return fail(f"Upload at most {MAX_FILES} files at a time.")
+    files, _, _, error = parse_files(uploads)
+    if error:
+        return fail(error)
+
+    entries, source_files, removed = merge_entries(files)
+    total = sum(len(e) for _, e in files)
+    fmt = request.form.get("dedupe_format") if request.form.get("dedupe_format") in EXPORT_FORMATS else "bib"
+    if fmt == "bib":
+        data = write_bib(entries)
+    else:
+        # 表格导出所有非空字段，表头用易读的名称，顺序和导出区一致
+        table = build_table(entries, source_files).astype(str)
+        columns = [name for name, _ in export_fields(table)]
+        export = table[columns].rename(columns=field_label)
+        data = csv_bytes(export) if fmt == "csv" else excel_bytes(export, sheet_name="References")
+    summary = (f"{len(files)} file{'s' if len(files) != 1 else ''}, {total} entries: "
+               f"{removed} duplicate{'s' if removed != 1 else ''} removed, {len(entries)} kept")
+    extension, mimetype = EXPORT_FORMATS[fmt]
+    response = send_file(io.BytesIO(data), mimetype=mimetype,
+                         as_attachment=True, download_name=f"bibscore_merged.{extension}")
+    response.headers["X-Merge-Summary"] = summary
+    return response
 
 
 @app.errorhandler(413)

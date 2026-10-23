@@ -19,6 +19,8 @@ BibScorer is a small Flask web app that ranks your references by keywords you ch
    - **EBSCO XML**, from EBSCO's *Download → XML*. Titles, authors, dates, abstracts, DOIs, links and publishers are converted to BibTeX fields, and a citation key such as `han2026double` is generated for each record. EBSCO's XML has no keywords or journal names, so only the title and abstract are scored.
 
    When you upload several files, their entries are combined and **duplicates are removed automatically**. Two entries count as duplicates if they have the same DOI, or, when there's no DOI, the same title (ignoring case, punctuation and braces). For very short titles, the first author must match too. The most complete version of each duplicate is kept. The page shows how many entries came from each file and how many duplicates were removed, and a `Source file` field records where each entry came from. If two different entries share a citation key, such as `smith2021` in two files, the second one becomes `smith2021a`.
+
+   To only merge files without ranking them, select two or more files, pick a format under the file box (BibTeX, CSV or Excel), and click **Download**. You get the combined, deduplicated list right away. Nothing is stored on the server.
 2. **Define weights**, one `keyword:weight` pair per line. Weights are integers:
    ```
    just transition:3
@@ -133,6 +135,8 @@ BibScorer 是一个基于 Flask 的小型网页工具，按你自定义的关键
    - **EBSCO XML**：在 EBSCO 里用 *Download → XML* 导出的文件。标题、作者、日期、摘要、DOI、链接和出版商会转换成 BibTeX 字段，并为每条记录生成一个引用键，比如 `han2026double`。EBSCO 的 XML 里没有关键词和期刊名，所以只按标题和摘要打分。
 
    同时上传多个文件时，所有文献会合在一起，并**自动去重**。判断重复的规则是：DOI 相同；没有 DOI 时，标题相同（忽略大小写、标点和花括号）。标题很短时，还要求第一作者也相同。重复的文献只保留字段最完整的那个版本。页面上会显示每个文件读到了多少篇、去掉了多少篇重复，导出时可以选 `Source file` 字段，看每篇来自哪个文件。如果两篇不同的文献用了同一个引用键（比如两个文件里都有 `smith2021`），第二篇会改成 `smith2021a`。
+
+   如果只想合并文件、不需要排序：选两个以上的文件，在文件框下方选好格式（BibTeX、CSV 或 Excel），点 **Download**，就会直接下载合并去重后的文件。这个操作不会在服务器上保存任何数据。
 2. **设置权重**，每行一条 `关键词:权重`，权重为整数：
    ```
    just transition:3

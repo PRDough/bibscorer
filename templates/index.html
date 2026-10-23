@@ -30,6 +30,20 @@
         Your entries are kept for one hour so you can re-rank and export, then deleted.
       </p>
       {% endif %}
+      <!-- 附带的小功能：选了多个文件时才显示，不打分，直接下载合并去重后的文件 -->
+      <div class="dedupe" id="dedupe-box" hidden>
+        <span class="dedupe-lead">Only need the files combined, without duplicates and without ranking?</span>
+        <span class="dedupe-controls">
+          <select class="select-mini" id="dedupe_format" name="dedupe_format" aria-label="Format of the combined file">
+            <option value="bib">BibTeX (.bib)</option>
+            <option value="csv">CSV</option>
+            <option value="xlsx">Excel (.xlsx)</option>
+          </select>
+          <button type="submit" class="btn-mini" id="dedupe-btn"
+            formaction="/dedupe" formmethod="post" formnovalidate>Download</button>
+        </span>
+        <span class="dedupe-status" id="dedupe-status" role="status" aria-live="polite"></span>
+      </div>
     </div>
   </section>
 
@@ -263,6 +277,57 @@
     });
   });
   syncExport();
+
+  // 一键去重：选了两个以上文件时显示按钮；点击后合并去重，完成后自动下载
+  (function () {
+    var input = document.getElementById("bibfile");
+    var box = document.getElementById("dedupe-box");
+    var btn = document.getElementById("dedupe-btn");
+    var status = document.getElementById("dedupe-status");
+    var label = btn.textContent;
+    function toggle() {
+      box.hidden = !(input.files && input.files.length > 1);
+      status.textContent = "";
+    }
+    input.addEventListener("change", toggle);
+    toggle();
+
+    btn.addEventListener("click", function (e) {
+      if (!window.fetch || !window.FormData || !window.URL || !URL.createObjectURL) return;  // 交给普通表单提交
+      e.preventDefault();
+      var format = document.getElementById("dedupe_format").value;
+      var data = new FormData();
+      Array.prototype.forEach.call(input.files, function (f) { data.append("bibfile", f); });
+      data.append("dedupe_format", format);
+      btn.disabled = true;
+      btn.textContent = "Combining…";
+      status.textContent = "";
+      fetch("/dedupe", { method: "POST", body: data, headers: { "X-Requested-With": "fetch" } })
+        .then(function (r) {
+          if (r.status === 413) throw new Error("The files are too large (limit: 10 MB in total).");
+          if (!r.ok) return r.text().then(function (t) { throw new Error(t || "Could not combine the files."); });
+          var summary = r.headers.get("X-Merge-Summary") || "";
+          return r.blob().then(function (blob) {
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement("a");
+            link.href = url;
+            link.download = "bibscore_merged." + format;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+            status.textContent = "Downloaded. " + summary + ".";
+          });
+        })
+        .catch(function (err) {
+          status.textContent = err && err.message ? err.message : "Could not combine the files.";
+        })
+        .then(function () {
+          btn.disabled = false;
+          btn.textContent = label;
+        });
+    });
+  })();
 
   // 浏览器后退回到页面时恢复按钮
   window.addEventListener("pageshow", function () {

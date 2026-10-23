@@ -228,3 +228,22 @@ input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var
 input[type="radio"] { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); }
 .hint { font-size: 14px; font-weight: normal; }
 .export .btn-secondary { margin-top: 24px; }
+
+/* --- 一键去重（附带的小功能，存在感要低于主按钮） --- */
+.dedupe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--ink);
+  font-size: 14px;
+}
+.dedupe-controls { display: inline-flex; align-items: center; gap: 6px; }
+.select-mini { width: auto; padding: 3px 6px; border-width: 1px; font-size: 13px; }
+.btn-mini { padding: 4px 10px; border-width: 1px; background: var(--ink); color: var(--paper); font-size: 13px; white-space: nowrap; }
+.btn-mini:hover { background: var(--paper); color: var(--ink); }
+.btn-mini:disabled { cursor: progress; background: var(--paper); color: var(--ink); }
+.dedupe-status { flex-basis: 100%; font-size: 13px; }
+.dedupe-status:empty { display: none; }
